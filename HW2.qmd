@@ -1,0 +1,7 @@
+---
+title: "Exploring patterns of environmental justice"
+author: "Kelly Morgan"
+format: pdf
+---
+
+## Test test
