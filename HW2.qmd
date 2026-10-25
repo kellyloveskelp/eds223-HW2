@@ -1,7 +1,250 @@
 ---
 title: "Exploring patterns of environmental justice"
+subtitle: "Redlining in Los Angeles County, CA"
 author: "Kelly Morgan"
 format: pdf
 ---
 
-## Test test
+## Part 1: Legacy of redlining in current environmental (in)justice
+
+Your first task is to explore historical redlining in **Los Angeles** and its legacy on present-day environmental justice.
+
+```{r}
+#| warning: false
+#| message: false
+library(plyr)
+library(sf)
+library(tmap)
+library(tidyverse)
+library(spData)
+library(here)
+library(gt)
+```
+
+```{r}
+# Import the data
+LA <- st_read(here('data', 'mapping-inequality/mapping-inequality-los-angeles.json'))
+
+ej_screen_LA <- st_read(here('data', 'ejscreen','EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb')) |> 
+  filter(
+    STATE_NAME == "California",
+    CNTY_NAME == "Los Angeles County"
+  )
+
+crashes <- read_csv('data/SWITRS_LA/Crashes.csv')
+```
+
+### Create a map of historical redlining neighborhoods, including:
+- neighborhoods colored by HOLC grade
+- an appropriate base map
+- a clear title and legend
+
+```{r}
+# Create color palette for HOLC Grade visualizations
+# Made in collaboration with MEDS classmate, Sarah Busby
+holc_color <- c("A" = "#76a865",
+                "B" = "#7cb5bd",
+                "C" = "#ffff00",
+                "D" = "#d9838d",
+                na.value = "#A9A9A9"
+    )
+```
+
+```{r}
+LA_map <-
+tm_basemap("OpenStreetMap") +
+  tm_shape(LA, is.main = TRUE) +
+  tm_polygons(
+    fill = "grade",             
+    fill.scale = tm_scale_categorical(
+      values = holc_color), 
+    fill_alpha = 0.7, 
+    fill.legend = tm_legend(title = "HOLC Grade")
+  ) + 
+    tm_borders(
+        lwd = 0.5,
+        lty = "solid"
+    ) +
+    tm_title("HOLC Grade in LA County") +    
+    tm_legend(position = tm_pos_out("right", "center")) +      
+    tm_compass(position = c("right", "top")) +          
+    tm_scalebar(position = c("right", "bottom")) +      
+    tm_layout(frame = TRUE)           
+
+LA_map
+```
+
+### Create a table summarizing:
+- the percentage of census block groups that fall within each HOLC grade
+    - Also include the percent of census black groups that don’t fall within a HOLC grade in your table
+    - Hint: The HOLC data contains the grades and the EJScreen data contains the census blocks, so you will need to combine the data spatially before doing summary statistics. Once you combine and no longer need the geometries, you can use st_drop_geometry().
+
+```{r}
+# First, check each dataset's crs:
+if(st_crs(LA) == st_crs(ej_screen_LA)){
+  print("It's a match.")
+  }else{
+  print("Stop! Not a match.")
+}
+```
+
+```{r}
+# What are the indv. dataset crs's?
+st_crs(ej_screen_LA) # WGS 84 / Psuedo-Mercator, "EPSG", 3857
+st_crs(LA) # WGS 84, "EPSG", 4326
+```
+
+```{r}
+# Set the same crs for each dataset
+ej_screen_transform <- st_transform(ej_screen_LA, crs = st_crs(LA))
+# Do the crs's match now?
+st_crs(ej_screen_transform) == st_crs(LA)
+```
+
+```{r}
+# Fix HOLC geometries to solve join error 
+LA <- st_make_valid(LA)
+
+# Joining datasets by geometries, default = st_intersect()
+LA_left_join <-
+  st_join(LA, ej_screen_transform) |> 
+  st_drop_geometry() |> 
+  select(ID, grade) |> 
+  group_by(grade) |> 
+  summarize(Blocks = n()) |> 
+  mutate(Percent = Blocks/sum(Blocks)*100) |> 
+  rename(HOLC_Grade = grade)
+
+LA_left_join %>%
+  gt() %>%
+    tab_header(title = md("Percentage of Census Block Groups per HOLC Grade"))
+```
+
+### Create at least two visualizations summarizing current conditions (from the EJScreen data) within HOLC grades using the mean of the following variables (you may combine variables in a single visualization or look at a single variable per plot):
+- % low income
+- percentile for Particulate Matter 2.5
+- percentile for low life expectancy
+- Use ggplot for your visualizations! You will first need to calculate mean of each variable grouped by HOLC grade.
+
+```{r}
+# Joining datasets by geometries, default = st_intersect()
+EJ_HOLC_left_join <-
+  st_join(LA, ej_screen_transform) |> 
+  st_drop_geometry() |> 
+  group_by(grade) |> 
+  summarize(
+    `Low Income` = (mean(LOWINCPCT, na.rm = TRUE)*100),
+    `Particulate Matter 2.5` = mean(P_PM25, na.rm = TRUE),
+    `Low Life Expectancy` = mean(P_LIFEEXPPCT, na.rm = TRUE)
+    )
+```
+
+```{r}
+# Pivoting dataset for ease of combined visualization
+EJ_HOLC_longer <- EJ_HOLC_left_join |> 
+  pivot_longer(
+  cols = 2:4,
+  names_to = "Percentile",
+  values_to = "Means") |> 
+  ggplot(aes(
+  x = grade, 
+  y = Means,
+  fill = Percentile
+  )) +
+  geom_col(position = "dodge") +
+  labs(                                               
+    title = "Mean Percentile by Grade",
+    x = "HOLC Grade",
+    y = "Mean Percentile",
+  )
+EJ_HOLC_longer
+```
+
+### Write a brief paragraph reflecting on these results
+- Interpret the patterns you observe in your results
+- Discuss potential relationships between historical redlining grades and current environmental/socioeconomic conditions
+
+There is a clear relationship between current environmental injustice conditions and the Home Owners’ Loan Corporation's redlining of neighborhoods in the Los Angeles area: from "A" ("Best") to "D" ("Hazardous"), the mean percentile of low income, low life expectancy, and Particulate Matter 2.5 increase. Neighborhoods rated as "D" have more then double the mean percentile rates of low income and low life expectancy as compared to neighborhoods rated "A". The mean percentile of Particulate Matter 2.5 rates are relatively high across categories, as is characteristic of Los Angeles. However, it's worth noting that there is a trend in worsening air pollution from "A" to "D" rating, demonstrating that redlining has even affected the air quaility in a given neighborhood.
+
+## Part 2: Legacy of redlining in pedstrian and bike accidents
+
+For this assignment, you must produce the following based on observations from _2020-2025_:
+
+- A figure summarizing the percent of observations within redlined neighborhoods within each HOLC grade
+
+- Create a visualizations that shows:
+    - The percentage of bike and pedestrian crashes and fatalities within each HOLC grade
+        - Include an appropiate title, axis labels, and legend
+        - Hints: Make sure to filter for bike and pedestrian crahes(PEDESTRIAN_ACCIDENT and BICYCLE_ACCIDENT). Look at the difference in NAs between POINT_X/POINT_Y and LONGITUDE/LATITUDE before you decide which to use. Ensure the SWITRS data and HOLC dataset have matching CRS’, then perform a spatial join to assign each crash to a corresponding HOLC grade.
+
+```{r}
+# "POINT_X/POINT_Y" columns contain less NAs
+print(paste("POINT_X NAs = ", sum(is.na(crashes$POINT_X))))
+print(paste("LONGITUDE NAs = ", sum(is.na(crashes$LONGITUDE))))
+```
+
+```{r}
+crashes_filtered <- crashes |> 
+  select(
+    ACCIDENT_YEAR, 
+    PEDESTRIAN_ACCIDENT, 
+    BICYCLE_ACCIDENT, 
+    POINT_X, 
+    POINT_Y
+  ) |> 
+  filter(
+    ACCIDENT_YEAR >= 2020 | 
+      ACCIDENT_YEAR <= 2025
+  ) |> 
+  drop_na(
+    POINT_X,
+    POINT_Y
+  ) |> 
+  st_as_sf(
+    coords = c("POINT_X", "POINT_Y"), 
+    crs = st_crs(LA)
+  )
+```
+
+```{r}
+# First, check each dataset's crs:
+if(st_crs(LA) == st_crs(crashes_filtered)){
+  print("It's a match.")
+  }else{
+  print("Stop! Not a match.")
+  }
+```
+
+```{r}
+crashes_left_join <-
+  st_join(LA, crashes_filtered) |> 
+  st_drop_geometry() |> 
+  select(
+    grade,
+    PEDESTRIAN_ACCIDENT, 
+    BICYCLE_ACCIDENT
+  ) |> 
+  group_by(grade) |> 
+  summarize(
+    total = sum(PEDESTRIAN_ACCIDENT == "Y",
+                BICYCLE_ACCIDENT == "Y",
+                na.rm = TRUE)
+  ) |> 
+  mutate(percent = total/sum(total)*100)
+
+crashes_left_join
+```
+
+
+```{r}
+ggplot(crashes_left_join, aes(
+  x = grade, 
+  y = percent
+  )) +
+  geom_col(fill = holc_color) +
+  labs(                                               
+    title = "Crashes and Fatalities by HOLC Grade",
+    x = "HOLC Grade",
+    y = "Percent of Crashes and Fatalities",
+  )
+```
